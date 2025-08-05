@@ -13,6 +13,7 @@ inv_file_2 = st.file_uploader("📁 Upload Second Inventory File", type=['xlsx']
 
 if inv_file_1 and inv_file_2:
     try:
+        # قراءة كل الشيتات
         df1 = pd.read_excel(inv_file_1, sheet_name=None)
         df2 = pd.read_excel(inv_file_2, sheet_name=None)
 
@@ -21,36 +22,36 @@ if inv_file_1 and inv_file_2:
             for sheet_name, sheet in sheet_dict.items():
                 if set(['Barcodes', 'Product Name', 'Actual Quantity']).issubset(sheet.columns):
                     sheet = sheet[['Barcodes', 'Product Name', 'Actual Quantity']].copy()
-                    sheet['Brand'] = sheet_name
+                    sheet['Brand'] = sheet_name  # نستخدم اسم الشيت كبراند
                     sheet = sheet.dropna(subset=['Barcodes'])
                     combined_df = pd.concat([combined_df, sheet], ignore_index=True)
             return combined_df
 
+        # تجهيز الملفين
         inv1_df = combine_inventory_data(df1).rename(columns={'Actual Quantity': 'Qty_1'})
         inv2_df = combine_inventory_data(df2).rename(columns={'Actual Quantity': 'Qty_2'})
 
+        # دمجهم بالباركود
         merged = pd.merge(inv1_df, inv2_df, on='Barcodes', how='outer')
         merged['Product Name'] = merged['Product Name_x'].combine_first(merged['Product Name_y'])
         merged['Brand'] = merged['Brand_x'].combine_first(merged['Brand_y'])
-
         merged = merged[['Barcodes', 'Product Name', 'Brand', 'Qty_1', 'Qty_2']]
+
         merged['Qty_1'] = merged['Qty_1'].fillna(0)
         merged['Qty_2'] = merged['Qty_2'].fillna(0)
         merged['Difference'] = abs(merged['Qty_1'] - merged['Qty_2'])
-
-        # 🧠 حساب base لكل منتج (متوسط بين القيمتين)
         merged['Base Total'] = (merged['Qty_1'] + merged['Qty_2']) / 2
 
-        # 🎯 حساب Accuracy per row
+        # دالة لحساب Accuracy بدون قيم سالبة
         def calculate_accuracy(row):
             if row['Base Total'] == 0:
                 return 100.0
             else:
-                return 100 - (row['Difference'] / row['Base Total'] * 100)
+                return max(0.0, 100 - (row['Difference'] / row['Base Total'] * 100))
 
         merged['Accuracy %'] = merged.apply(calculate_accuracy, axis=1)
 
-        # 📊 الحساب العام
+        # الحساب العام
         overall_accuracy = merged['Accuracy %'].mean()
         total_difference = merged['Difference'].sum()
         avg_diff = merged['Difference'].mean()
@@ -63,7 +64,7 @@ if inv_file_1 and inv_file_2:
         col3.metric("📊 Total Difference", f"{total_difference}")
         col4.metric("🎯 Overall Accuracy", f"{overall_accuracy:.2f}%")
 
-        # 🏷️ الحساب لكل براند
+        # ملخص لكل براند
         st.subheader("🏷️ Accuracy per Brand")
         brand_summary = merged.groupby('Brand').agg({
             'Qty_1': 'sum',
@@ -76,17 +77,18 @@ if inv_file_1 and inv_file_2:
             if row['Base Total'] == 0:
                 return 100.0
             else:
-                return 100 - (row['Difference'] / row['Base Total'] * 100)
+                return max(0.0, 100 - (row['Difference'] / row['Base Total'] * 100))
 
         brand_summary['Accuracy %'] = brand_summary.apply(brand_accuracy, axis=1)
         brand_summary_display = brand_summary[['Brand', 'Qty_1', 'Qty_2', 'Difference', 'Accuracy %']]
         st.dataframe(brand_summary_display, use_container_width=True)
 
-        # جدول التفاصيل
+        # جدول تفصيلي
         with st.expander("📋 Show Detailed Comparison Table"):
-            st.dataframe(merged[['Barcodes', 'Product Name', 'Brand', 'Qty_1', 'Qty_2', 'Difference', 'Accuracy %']], use_container_width=True)
+            st.dataframe(merged[['Barcodes', 'Product Name', 'Brand', 'Qty_1', 'Qty_2', 'Difference', 'Accuracy %']],
+                         use_container_width=True)
 
-        # تصدير التقرير
+        # تحميل التقرير
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             merged.to_excel(writer, sheet_name='Detailed Comparison', index=False)
