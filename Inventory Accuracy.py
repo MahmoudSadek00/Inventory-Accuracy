@@ -21,7 +21,7 @@ if inv_file_1 and inv_file_2:
             for sheet_name, sheet in sheet_dict.items():
                 if set(['Barcodes', 'Product Name', 'Actual Quantity']).issubset(sheet.columns):
                     sheet = sheet[['Barcodes', 'Product Name', 'Actual Quantity']].copy()
-                    sheet['Brand'] = sheet_name  # نستخدم اسم الشيت كبراند
+                    sheet['Brand'] = sheet_name
                     sheet = sheet.dropna(subset=['Barcodes'])
                     combined_df = pd.concat([combined_df, sheet], ignore_index=True)
             return combined_df
@@ -38,38 +38,53 @@ if inv_file_1 and inv_file_2:
         merged['Qty_2'] = merged['Qty_2'].fillna(0)
         merged['Difference'] = abs(merged['Qty_1'] - merged['Qty_2'])
 
-        # الحساب العام
+        # 🧠 حساب base لكل منتج (متوسط بين القيمتين)
+        merged['Base Total'] = (merged['Qty_1'] + merged['Qty_2']) / 2
+
+        # 🎯 حساب Accuracy per row
+        def calculate_accuracy(row):
+            if row['Base Total'] == 0:
+                return 100.0
+            else:
+                return 100 - (row['Difference'] / row['Base Total'] * 100)
+
+        merged['Accuracy %'] = merged.apply(calculate_accuracy, axis=1)
+
+        # 📊 الحساب العام
+        overall_accuracy = merged['Accuracy %'].mean()
         total_difference = merged['Difference'].sum()
-        base_total = merged[['Qty_1', 'Qty_2']].sum(axis=1).sum() / 2
-        accuracy = 100 - (total_difference / base_total * 100) if base_total > 0 else 0
-        match_rate = (merged['Difference'] == 0).sum() / len(merged) * 100
         avg_diff = merged['Difference'].mean()
+        match_rate = (merged['Difference'] == 0).sum() / len(merged) * 100
 
         st.subheader("📊 Overall Accuracy Metrics")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("✅ Match Rate", f"{match_rate:.2f}%")
         col2.metric("📉 Avg. Difference", f"{avg_diff:.2f}")
         col3.metric("📊 Total Difference", f"{total_difference}")
-        col4.metric("🎯 Accuracy", f"{accuracy:.2f}%")
+        col4.metric("🎯 Overall Accuracy", f"{overall_accuracy:.2f}%")
 
-        # الحساب لكل براند
+        # 🏷️ الحساب لكل براند
         st.subheader("🏷️ Accuracy per Brand")
         brand_summary = merged.groupby('Brand').agg({
             'Qty_1': 'sum',
             'Qty_2': 'sum',
-            'Difference': 'sum'
+            'Difference': 'sum',
+            'Base Total': 'sum'
         }).reset_index()
 
-        brand_summary['Base Total'] = (brand_summary['Qty_1'] + brand_summary['Qty_2']) / 2
-        brand_summary['Accuracy %'] = 100 - (brand_summary['Difference'] / brand_summary['Base Total'] * 100)
-        brand_summary['Accuracy %'] = brand_summary['Accuracy %'].fillna(0)
+        def brand_accuracy(row):
+            if row['Base Total'] == 0:
+                return 100.0
+            else:
+                return 100 - (row['Difference'] / row['Base Total'] * 100)
 
+        brand_summary['Accuracy %'] = brand_summary.apply(brand_accuracy, axis=1)
         brand_summary_display = brand_summary[['Brand', 'Qty_1', 'Qty_2', 'Difference', 'Accuracy %']]
-        st.dataframe(brand_summary_display)
+        st.dataframe(brand_summary_display, use_container_width=True)
 
         # جدول التفاصيل
         with st.expander("📋 Show Detailed Comparison Table"):
-            st.dataframe(merged)
+            st.dataframe(merged[['Barcodes', 'Product Name', 'Brand', 'Qty_1', 'Qty_2', 'Difference', 'Accuracy %']], use_container_width=True)
 
         # تصدير التقرير
         output = BytesIO()
